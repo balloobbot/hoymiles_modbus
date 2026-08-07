@@ -25,7 +25,9 @@ Disclaimer: This is an independent project, not affiliated with Hoymiles. Any tr
 
 ## Features
 
-* Communication via Modbus TCP
+* Asynchronous communication, built on [modbus-connection](https://home-assistant-libs.github.io/modbus-connection/)
+* Works over any transport that modbus-connection supports, with the caller owning the connection
+* Tolerates DTUs that misreport the data size of their responses
 * Decode all inverter status registers, which include information such as:
   * current production
   * total production

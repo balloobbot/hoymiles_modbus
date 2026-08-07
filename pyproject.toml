@@ -13,8 +13,6 @@ classifiers=[
     'License :: OSI Approved :: MIT License',
     'Natural Language :: English',
     'Programming Language :: Python :: 3',
-    'Programming Language :: Python :: 3.10',
-    'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
     'Programming Language :: Python :: 3.13',
 ]
@@ -24,7 +22,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.14"
+python = ">=3.12,<3.14"
 
 black  = {version = "^24.8.0", optional = true}
 isort  = { version = "^5.8.0", optional = true}
@@ -32,6 +30,7 @@ flake8  = { version = "^7.1.1", optional = true}
 flake8-docstrings = { version = "^1.6.0", optional = true }
 mypy = {version = "^1", optional = true}
 pytest  = { version = "^8.3.2", optional = true}
+pytest-asyncio  = { version = "^0.24", optional = true}
 pytest-cov  = { version = "^5.0.0", optional = true}
 tox  = { version = "^4.17.1", optional = true}
 virtualenv  = { version = "^20.2.2", optional = true}
@@ -46,11 +45,14 @@ pre-commit = {version = "^3.8.0", optional = true}
 toml = {version = "^0.10.2", optional = true}
 bump2version = {version = "^1.0.1", optional = true}
 plum-py = "^0.8.0"
-pymodbus = "^3.11.0"
+# The pymodbus backend is not optional: the DTU data size workaround in
+# hoymiles_modbus._quirks can only be applied to a pymodbus-backed connection.
+modbus-connection = {version = "^4.1.0", extras = ["pymodbus"]}
 
 [tool.poetry.extras]
 test = [
     "pytest",
+    "pytest-asyncio",
     "black",
     "isort",
     "mypy",
@@ -68,6 +70,9 @@ doc = [
     "mkdocstrings",
     "mkdocs-autorefs"
     ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 120

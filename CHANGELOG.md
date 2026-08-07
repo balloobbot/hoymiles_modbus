@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.0]
+
+Breaking changes:
+* the library is now asynchronous and built on [modbus-connection](https://home-assistant-libs.github.io/modbus-connection/) instead of using pymodbus directly
+* `HoymilesModbusTCP` is replaced by `HoymilesDTU`, which takes a `ModbusUnit` rather than a host and port. The caller now creates and closes the connection, so one link can be shared with other consumers of the same device
+* the `inverters`, `dtu` and `plant_data` properties are replaced by attributes of the same name, refreshed by `async_update()`
+* `CommunicationParams` is removed. Its settings were pymodbus specific; timeouts and request spacing are now given to `ModbusConnection` by the caller
+* failed requests raise `modbus_connection.ModbusError` subclasses instead of `RuntimeError`
+* dropped support for Python 3.10 and 3.11, as required by modbus-connection
+
+Features:
+* `HoymilesDTU.async_probe()` reads the DTU serial number without polling the inverters, for identifying a device during setup
+
+Notes:
+* the workaround for DTUs that misreport the data size of their responses is retained, and needs the pymodbus backend of modbus-connection
+
 ## [0.10.0] (2025-09-01)
 
 * bump pymodbus to 3.11

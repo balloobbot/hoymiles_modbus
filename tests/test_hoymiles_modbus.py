@@ -1,234 +1,206 @@
 #!/usr/bin/env python
 """Tests for `hoymiles_modbus` package."""
+
 from decimal import Decimal
-from unittest import mock
 
 import pytest
+from modbus_connection import ModbusExceptionError, ModbusUnit
+from modbus_connection.mock import MockModbusConnection, MockModbusUnit
 
-from hoymiles_modbus._modbus_tcp_client import ModbusTcpClient
-from hoymiles_modbus.client import HoymilesModbusTCP
+from hoymiles_modbus.client import HoymilesDTU
 from hoymiles_modbus.datatypes import InverterData
 
-example_mi_series_raw_responses = [
-    b'(\x0c\x1032\x41cU\x01\x01^\x00\x02\tM\x13\x88\x00f\x02\xef\x00\x01$G\x00+\x00\x03\x00\x00\x00\x00\x01'
-    b'\x07\x00\x00\x00\x00\x00\x00',
-    b'P\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00',
-]
+DTU_SERIAL_NUMBER_ADDRESS = 0x2000
+INVERTER_BASE_ADDRESS = 0x1000
+INVERTER_ADDRESS_STRIDE = 40
 
-example_hm_series_raw_responses = [
-    b'(\x0c\x1132\x41cU\x01\x01^\x00\x02\tM\x13\x88\x00f\x02\xef\x00\x01$G\x00+\x00\x03\x00\x00\x00\x00\x01'
-    b'\x07\x00\x00\x00\x00\x00\x00',
-    b'P\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00',
-]
+example_mi_series_raw_data = (
+    b'\x0c\x1032\x41cU\x01\x01^\x00\x02\tM\x13\x88\x00f\x02\xef\x00\x01$G\x00+\x00\x03\x00\x00\x00\x00\x01'
+    b'\x07\x00\x00\x00\x00\x00\x00'
+)
 
+example_hm_series_raw_data = (
+    b'\x0c\x1132\x41cU\x01\x01^\x00\x02\tM\x13\x88\x00f\x02\xef\x00\x01$G\x00+\x00\x03\x00\x00\x00\x00\x01'
+    b'\x07\x00\x00\x00\x00\x00\x00'
+)
 
-example_unknown_series_raw_responses = [
-    b'(\x0c\x1232\x41cU\x01\x01^\x00\x02\tM\x13\x88\x00f\x02\xef\x00\x01$G\x00+\x00\x03\x00\x00\x00\x00\x01'
-    b'\x07\x00\x00\x00\x00\x00\x00',
-    b'P\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    b'\x00\x00\x00',
-]
+null_inverter_raw_data = bytes(40)
+
+example_dtu_serial_number_raw_data = b'\x11\xd3a`\x081'
 
 
-def test_inverter_data_decode_mi_series():
+def to_registers(data: bytes) -> list[int]:
+    """Convert raw response bytes to the register words a Modbus read returns."""
+    return [int.from_bytes(data[i : i + 2], 'big') for i in range(0, len(data), 2)]
+
+
+def map_inverters(unit, *raw_data: bytes) -> None:
+    """Place inverter data blocks at the addresses the DTU serves them from."""
+    for i, data in enumerate((*raw_data, null_inverter_raw_data)):
+        unit.holding[INVERTER_BASE_ADDRESS + i * INVERTER_ADDRESS_STRIDE] = to_registers(data)
+
+
+@pytest.fixture
+def dtu_unit(mock_modbus_unit):
+    """Build a mock unit answering as a DTU with a serial number mapped."""
+    mock_modbus_unit.holding[DTU_SERIAL_NUMBER_ADDRESS] = to_registers(example_dtu_serial_number_raw_data)
+    return mock_modbus_unit
+
+
+expected_mi_series_inverter = InverterData(  # type: ignore[call-overload]
+    data_type=12,
+    serial_number='103332416355',
+    port_number=1,
+    pv_voltage=Decimal('35'),
+    pv_current=Decimal('0.2'),
+    grid_voltage=Decimal('238.1'),
+    grid_frequency=Decimal('50'),
+    pv_power=Decimal('10.2'),
+    today_production=751,
+    total_production=74823,
+    temperature=Decimal('4.3'),
+    operating_status=3,
+    alarm_code=0,
+    alarm_count=0,
+    link_status=1,
+    reserved=[7, 0, 0, 0, 0, 0, 0],
+)
+
+expected_hm_series_inverter = InverterData(  # type: ignore[call-overload]
+    data_type=12,
+    serial_number='113332416355',
+    port_number=1,
+    pv_voltage=Decimal('35'),
+    pv_current=Decimal('0.02'),
+    grid_voltage=Decimal('238.1'),
+    grid_frequency=Decimal('50'),
+    pv_power=Decimal('10.2'),
+    today_production=751,
+    total_production=74823,
+    temperature=Decimal('4.3'),
+    operating_status=3,
+    alarm_code=0,
+    alarm_count=0,
+    link_status=1,
+    reserved=[7, 0, 0, 0, 0, 0, 0],
+)
+
+
+async def test_inverter_data_decode_mi_series(dtu_unit):
     """Test decoding MI series inverter data."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        client_mock.read_holding_registers.return_value.encode.side_effect = example_mi_series_raw_responses
-        client_mock.read_holding_registers.return_value.isError.return_value = False
-        expected = [
-            InverterData(
-                data_type=12,
-                serial_number='103332416355',
-                port_number=1,
-                pv_voltage=Decimal('35'),
-                pv_current=Decimal('0.2'),
-                grid_voltage=Decimal('238.1'),
-                grid_frequency=Decimal('50'),
-                pv_power=Decimal('10.2'),
-                today_production=751,
-                total_production=74823,
-                temperature=Decimal('4.3'),
-                operating_status=3,
-                alarm_code=0,
-                alarm_count=0,
-                link_status=1,
-                reserved=[7, 0, 0, 0, 0, 0, 0],
-            )
-        ]
-        inverters_data = HoymilesModbusTCP('1.2.3.4').inverters
-        assert inverters_data == expected
+    map_inverters(dtu_unit, example_mi_series_raw_data)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.inverters == [expected_mi_series_inverter]
 
 
-def test_inverter_data_decode_hm_series():
+async def test_inverter_data_decode_hm_series(dtu_unit):
     """Test decoding HM inverter data."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        client_mock.read_holding_registers.return_value.encode.side_effect = example_hm_series_raw_responses
-        client_mock.read_holding_registers.return_value.isError.return_value = False
-        expected = [
-            InverterData(
-                data_type=12,
-                serial_number='113332416355',
-                port_number=1,
-                pv_voltage=Decimal('35'),
-                pv_current=Decimal('0.02'),
-                grid_voltage=Decimal('238.1'),
-                grid_frequency=Decimal('50'),
-                pv_power=Decimal('10.2'),
-                today_production=751,
-                total_production=74823,
-                temperature=Decimal('4.3'),
-                operating_status=3,
-                alarm_code=0,
-                alarm_count=0,
-                link_status=1,
-                reserved=[7, 0, 0, 0, 0, 0, 0],
-            )
-        ]
-        inverters_data = HoymilesModbusTCP('1.2.3.4').inverters
-        assert inverters_data == expected
+    map_inverters(dtu_unit, example_hm_series_raw_data)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.inverters == [expected_hm_series_inverter]
 
 
-def test_stop_inverter_data_decode_on_empty_serial():
+async def test_stop_inverter_data_decode_on_empty_serial(dtu_unit):
     """Verify that inverters data gathering stops on receiving first empty serial number."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        client_mock.read_holding_registers.return_value.encode.side_effect = example_mi_series_raw_responses + [
-            b'(\x0c\x1032\x41cU\x01\x01^\x00\x02\tM\x13\x88\x00f\x02\xef\x00\x01$G\x00+\x00\x03\x00\x00\x00\x00\x01'
-            b'\x07\x00\x00\x00\x00\x00\x00'
-        ]
-        client_mock.read_holding_registers.return_value.isError.return_value = False
-        assert len(HoymilesModbusTCP('1.2.3.4').inverters) == 1
+    map_inverters(dtu_unit, example_mi_series_raw_data)
+    # a block behind the null inverter is never reached
+    dtu_unit.holding[INVERTER_BASE_ADDRESS + 2 * INVERTER_ADDRESS_STRIDE] = to_registers(example_hm_series_raw_data)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.inverters == [expected_mi_series_inverter]
+    assert len(dtu_unit.read_events) == 3  # two inverter blocks, then the serial number
 
 
-def test_dtu():
+async def test_dtu(dtu_unit):
     """Test decoding DTU serial number."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        client_mock.read_holding_registers.return_value.encode.side_effect = [b'\x06\x11\xd3a`\x081']
-        client_mock.read_holding_registers.return_value.isError.return_value = False
-        assert HoymilesModbusTCP('1.2.3.4').dtu == '11d361600831'
+    map_inverters(dtu_unit)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.dtu == '11d361600831'
 
 
-example_inverters_data = [
-    InverterData(  # type: ignore[call-overload]
-        data_type=12,
-        serial_number='103332416355',
-        port_number=1,
-        pv_voltage=Decimal('35'),
-        pv_current=Decimal('0.2'),
-        grid_voltage=Decimal('238.1'),
-        grid_frequency=Decimal('50'),
-        pv_power=Decimal('10.2'),
-        today_production=751,
-        total_production=74823,
-        temperature=Decimal('4.3'),
-        operating_status=3,
-        alarm_code=0,
-        alarm_count=0,
-        link_status=1,
-        reserved=[7, 0, 0, 0, 0, 0, 0],
-    ),
-    InverterData(  # type: ignore[call-overload]
-        data_type=12,
-        serial_number='117763504101',
-        port_number=1,
-        pv_voltage=Decimal('34.8'),
-        pv_current=Decimal('0.2'),
-        grid_voltage=Decimal('237.9'),
-        grid_frequency=Decimal('50'),
-        pv_power=Decimal('9.9'),
-        today_production=679,
-        total_production=54328,
-        temperature=Decimal('6'),
-        operating_status=3,
-        alarm_code=0,
-        alarm_count=0,
-        link_status=1,
-        reserved=[7, 0, 0, 0, 0, 0, 0],
-    ),
-]
+async def test_dtu_serial_number_read_once(dtu_unit):
+    """Verify that the DTU serial number is read only on the first update."""
+    map_inverters(dtu_unit)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    reads_after_first_update = len(dtu_unit.read_events)
+    await device.async_update()
+    assert len(dtu_unit.read_events) == reads_after_first_update + 1  # only the inverter scan repeats
 
 
-def test_plant_data():
+async def test_probe(dtu_unit):
+    """Verify that probing reads the serial number without polling inverters."""
+    map_inverters(dtu_unit, example_mi_series_raw_data)
+    assert await HoymilesDTU.async_probe(dtu_unit) == '11d361600831'
+    assert [event.address for event in dtu_unit.read_events] == [DTU_SERIAL_NUMBER_ADDRESS]
+
+
+async def test_plant_data(dtu_unit):
     """Test calculated values in plant data."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        with mock.patch.object(HoymilesModbusTCP, 'dtu', new_callable=mock.PropertyMock, return_value='11d361600831'):
-            with mock.patch.object(
-                HoymilesModbusTCP,
-                'inverters',
-                new_callable=mock.PropertyMock,
-                return_value=example_inverters_data,
-            ):
-                plant_data = HoymilesModbusTCP('1.2.3.4').plant_data
-                assert plant_data.dtu == '11d361600831'
-                assert plant_data.today_production == 1430
-                assert plant_data.total_production == 129151
+    map_inverters(dtu_unit, example_mi_series_raw_data, example_hm_series_raw_data)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.plant_data.dtu == '11d361600831'
+    assert device.plant_data.pv_power == Decimal('20.4')
+    assert device.plant_data.today_production == 1502
+    assert device.plant_data.total_production == 149646
+    assert device.plant_data.inverters == [expected_mi_series_inverter, expected_hm_series_inverter]
 
 
-def test_no_alarm():
+async def test_no_alarm(dtu_unit):
     """Test inactive alarm in plant data."""
-    for data in example_inverters_data:
-        data.alarm_code = 0
-
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        with mock.patch.object(HoymilesModbusTCP, 'dtu', new_callable=mock.PropertyMock, return_value='11d361600831'):
-            with mock.patch.object(
-                HoymilesModbusTCP,
-                'inverters',
-                new_callable=mock.PropertyMock,
-                return_value=example_inverters_data,
-            ):
-                plant_data = HoymilesModbusTCP('1.2.3.4').plant_data
-                assert plant_data.alarm_flag is False
+    map_inverters(dtu_unit, example_mi_series_raw_data)
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.plant_data.alarm_flag is False
 
 
-def test_alarm():
+async def test_alarm(dtu_unit):
     """Test active alarm in plant data."""
-    example_inverters_data[0].alarm_code = 1
-
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        with mock.patch.object(HoymilesModbusTCP, 'dtu', new_callable=mock.PropertyMock, return_value='11d361600831'):
-            with mock.patch.object(
-                HoymilesModbusTCP,
-                'inverters',
-                new_callable=mock.PropertyMock,
-                return_value=example_inverters_data,
-            ):
-                plant_data = HoymilesModbusTCP('1.2.3.4').plant_data
-                assert plant_data.alarm_flag is True
+    alarming_inverter = bytearray(example_mi_series_raw_data)
+    alarming_inverter[29] = 1  # alarm code
+    map_inverters(dtu_unit, bytes(alarming_inverter))
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert device.plant_data.alarm_flag is True
 
 
-def test_modbus_response_exception():
-    """Verify that exception is raised when error in modbus response."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        response = mock.Mock()
-        response.isError.return_value = True
-        client_mock.read_holding_registers.return_value = response
-        with pytest.raises(RuntimeError):
-            _ = HoymilesModbusTCP('1.2.3.4').dtu
+async def test_unlinked_inverter_excluded_from_plant_data(dtu_unit):
+    """Verify that an inverter without link is not counted towards plant data."""
+    unlinked_inverter = bytearray(example_mi_series_raw_data)
+    unlinked_inverter[32] = 0  # link status
+    map_inverters(dtu_unit, example_mi_series_raw_data, bytes(unlinked_inverter))
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+    assert len(device.plant_data.inverters) == 2
+    assert device.plant_data.today_production == 751  # only the linked one
 
 
-def test_exception_when_no_inverters():
+async def test_modbus_error_propagates(dtu_unit):
+    """Verify that a modbus error from the unit is not swallowed."""
+    dtu_unit.fail_read(INVERTER_BASE_ADDRESS, ModbusExceptionError(2))
+    with pytest.raises(ModbusExceptionError):
+        await HoymilesDTU(dtu_unit).async_update()
+
+
+class _EmptyResponseUnit(MockModbusUnit):
+    """A unit whose reads come back empty, as an unmapped DTU answers them.
+
+    The DTU replies with no data at all, which the data size fixer turns into zero
+    registers rather than a decoding error - see `hoymiles_modbus._quirks`.
+    """
+
+    async def read_holding_registers(self, address: int, count: int) -> list[int]:
+        return []
+
+
+async def test_exception_when_no_inverters():
     """Test exception when there are no inverters."""
-    client_mock = mock.Mock()
-    with mock.patch.object(ModbusTcpClient, '__enter__', return_value=client_mock):
-        client_mock.read_holding_registers.return_value.encode.side_effect = [b'']
-        client_mock.read_holding_registers.return_value.isError.return_value = False
-        hoymiles_modbus_tcp = HoymilesModbusTCP('1.2.3.4')
-        with pytest.raises(RuntimeError) as err:
-            _ = hoymiles_modbus_tcp.inverters
-        assert str(err.value) == "Inverters not mapped yet."
+    unit = _EmptyResponseUnit(MockModbusConnection(), 1)
+    assert isinstance(unit, ModbusUnit)
+    with pytest.raises(RuntimeError) as err:
+        await HoymilesDTU(unit).async_update()
+    assert str(err.value) == "Inverters not mapped yet."

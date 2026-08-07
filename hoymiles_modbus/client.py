@@ -1,95 +1,93 @@
 """Hoymiles Modbus client."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from ._modbus_tcp_client import create_modbus_tcp_client
-from .datatypes import CommunicationParams, InverterData, PlantData, _serial_number_t
+from ._quirks import apply_dtu_quirks
+from .datatypes import InverterData, PlantData, _serial_number_t
 
 if TYPE_CHECKING:  # pragma: no cover
-    from pymodbus.client import ModbusTcpClient
+    from modbus_connection import ModbusUnit
 
 
-class HoymilesModbusTCP:
-    """Hoymiles Modbus TCP client.
+def _to_bytes(registers: list[int]) -> bytes:
+    return b''.join(register.to_bytes(2, 'big') for register in registers)
+
+
+class HoymilesDTU:
+    """Hoymiles DTU.
 
     Gather data from photovoltaic installation based on Hoymiles inverters managed by Hoymiles DTU (like DTU-pro).
-    The client communicates with DTU via Modbus TCP protocol.
+
+    The DTU is addressed through a `ModbusUnit`, so the caller owns the connection and decides which backend
+    and transport to use. A real DTU needs the pymodbus backend - see `hoymiles_modbus._quirks`.
 
     """
 
     _MAX_INVERTER_COUNT = 100
     _NULL_INVERTER = '000000000000'
+    _INVERTER_BASE_ADDRESS = 0x1000
+    _INVERTER_ADDRESS_STRIDE = 40
+    _INVERTER_REGISTER_COUNT = 20
+    _INVERTER_DATA_SIZE = 40
+    _DTU_SERIAL_NUMBER_ADDRESS = 0x2000
+    _DTU_SERIAL_NUMBER_REGISTER_COUNT = 3
 
-    def __init__(self, host: str, port: int = 502, unit_id: int = 1) -> None:
+    def __init__(self, unit: 'ModbusUnit') -> None:
         """Initialize the object.
 
         Arguments:
-            host: DTU address
-            port: target DTU modbus TCP port
-            unit_id: Modbus unit ID
+            unit: Modbus unit the DTU answers on
 
         """
-        self._host: str = host
-        self._port: int = port
-        self._dtu_serial_number: str = ''
-        self._unit_id = unit_id
-        self._comm_params: 'CommunicationParams' = CommunicationParams()
+        self._unit = unit
+        self.dtu: str = ''
+        """DTU serial number. Empty until the first update."""
+        self.inverters: list[InverterData] = []
+        """Status data from all inverters, as of the last update."""
+        self.plant_data: Optional[PlantData] = None
+        """Plant status data, as of the last update. `None` until the first update."""
 
-    @property
-    def comm_params(self) -> CommunicationParams:
-        """Low level communication parameters."""
-        return self._comm_params
+    @classmethod
+    async def async_probe(cls, unit: 'ModbusUnit') -> str:
+        """Read the DTU serial number, without polling the inverters.
 
-    def _get_client(self) -> "ModbusTcpClient":
-        return create_modbus_tcp_client(self._host, self._port, self.comm_params)
+        Identifies the device during setup, when reading the whole plant would be premature.
 
-    @staticmethod
-    def _read_registers(client: 'ModbusTcpClient', start_address: int, count: int, unit_id: int):
-        result = client.read_holding_registers(start_address, count=count, device_id=unit_id)
-        if result.isError():
-            raise RuntimeError(f'Received error response {result}')
-        return result
-
-    @property
-    def inverters(self) -> list[InverterData]:
-        """Status data from all inverters.
-
-        Each `get` is a new request and data from the installation.
+        Arguments:
+            unit: Modbus unit the DTU answers on
 
         """
+        await apply_dtu_quirks(unit)
+        registers = await unit.read_holding_registers(
+            cls._DTU_SERIAL_NUMBER_ADDRESS, cls._DTU_SERIAL_NUMBER_REGISTER_COUNT
+        )
+        return _serial_number_t.unpack(_to_bytes(registers))
+
+    async def async_update(self) -> None:
+        """Refresh all data with a new request to the installation."""
+        await apply_dtu_quirks(self._unit)
+        self.inverters = await self._async_read_inverters()
+        if not self.dtu:
+            self.dtu = await self.async_probe(self._unit)
+        self.plant_data = self._calculate_plant_data()
+
+    async def _async_read_inverters(self) -> list[InverterData]:
         data: list[InverterData] = []
-        with self._get_client() as client:
-            for i in range(self._MAX_INVERTER_COUNT):
-                start_address = i * 40 + 0x1000
-                result = self._read_registers(client, start_address, 20, self._unit_id)
-                data_to_unpack = result.encode()[1:41]
-                if i < 1 and len(data_to_unpack) < 1:
-                    raise RuntimeError("Inverters not mapped yet.")
-                inverter_data = InverterData.unpack(data_to_unpack)
-                if inverter_data.serial_number == self._NULL_INVERTER:
-                    break
-                data.append(inverter_data)
+        for i in range(self._MAX_INVERTER_COUNT):
+            start_address = i * self._INVERTER_ADDRESS_STRIDE + self._INVERTER_BASE_ADDRESS
+            registers = await self._unit.read_holding_registers(start_address, self._INVERTER_REGISTER_COUNT)
+            data_to_unpack = _to_bytes(registers)[: self._INVERTER_DATA_SIZE]
+            if i < 1 and len(data_to_unpack) < 1:
+                raise RuntimeError("Inverters not mapped yet.")
+            inverter_data = InverterData.unpack(data_to_unpack)
+            if inverter_data.serial_number == self._NULL_INVERTER:
+                break
+            data.append(inverter_data)
         return data
 
-    @property
-    def dtu(self) -> str:
-        """DTU serial number."""
-        if not self._dtu_serial_number:
-            with self._get_client() as client:
-                result = self._read_registers(client, 0x2000, 3, self._unit_id)
-                self._dtu_serial_number = _serial_number_t.unpack(result.encode()[1::])
-        return self._dtu_serial_number
-
-    @property
-    def plant_data(self) -> PlantData:
-        """Plant status data.
-
-        Each `get` is a new request and data from the installation.
-
-        """
-        inverters = self.inverters
-        data = PlantData(self.dtu, inverters=inverters)
-        for inverter in inverters:
+    def _calculate_plant_data(self) -> PlantData:
+        data = PlantData(self.dtu, inverters=self.inverters)
+        for inverter in self.inverters:
             # calculate plant data from inverters
             # only active inverters are included
             if inverter.link_status:
