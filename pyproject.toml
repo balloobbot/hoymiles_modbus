@@ -47,7 +47,7 @@ bump2version = {version = "^1.0.1", optional = true}
 plum-py = "^0.8.0"
 # The pymodbus backend is not optional: the DTU data size workaround in
 # hoymiles_modbus._quirks can only be applied to a pymodbus-backed connection.
-modbus-connection = {version = "^4.1.0", extras = ["pymodbus"]}
+modbus-connection = {version = "^4.2.0", extras = ["pymodbus"]}
 
 [tool.poetry.extras]
 test = [

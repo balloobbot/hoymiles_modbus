@@ -4,7 +4,13 @@
 from decimal import Decimal
 
 import pytest
-from modbus_connection import ModbusExceptionError, ModbusUnit
+from modbus_connection import (
+    ExceptionCode,
+    IllegalDataAddressError,
+    ModbusExceptionError,
+    ModbusUnit,
+    ServerDeviceFailureError,
+)
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
 
 from hoymiles_modbus.client import HoymilesDTU
@@ -180,10 +186,19 @@ async def test_unlinked_inverter_excluded_from_plant_data(dtu_unit):
 
 
 async def test_modbus_error_propagates(dtu_unit):
-    """Verify that a modbus error from the unit is not swallowed."""
-    dtu_unit.fail_read(INVERTER_BASE_ADDRESS, ModbusExceptionError(2))
+    """Verify that a modbus error from a refused block is not swallowed."""
+    dtu_unit.fail_read(INVERTER_BASE_ADDRESS, IllegalDataAddressError())
+    with pytest.raises(IllegalDataAddressError) as err:
+        await HoymilesDTU(dtu_unit).async_update()
+    assert err.value.exception_code is ExceptionCode.ILLEGAL_DATA_ADDRESS
+
+
+async def test_silent_dtu_error_propagates(dtu_unit):
+    """Verify that a DTU which answers nothing at all surfaces as a modbus error."""
+    dtu_unit.fail_requests(ServerDeviceFailureError())
     with pytest.raises(ModbusExceptionError):
         await HoymilesDTU(dtu_unit).async_update()
+    assert dtu_unit.read_events  # the attempt was made before it raised
 
 
 class _EmptyResponseUnit(MockModbusUnit):

@@ -44,17 +44,48 @@ disagrees with the payload they actually deliver, and only the pymodbus backend 
 adjusted to accept them. A `ModbusUnit` from another backend is accepted but such a DTU
 will fail to decode.
 
+## Unreliable DTUs
+
+Hoymiles DTUs are known to answer slowly right after the link opens, and to reach a
+state where the socket stays open but no request is ever answered. Two connection
+settings help, both owned by the caller:
+
+```python
+connection = ModbusConnection(
+    ModbusTcpParams(host='1.2.3.4'),
+    connect_delay=1.0,  # pause after the link opens, before the first request
+    message_spacing=0.1,  # pause between requests; a plant is read one inverter at a time
+)
+```
+
+When the DTU stops answering altogether, drop the link and let the next update build a
+new one. Unlike `close()`, the connection stays usable and the `HoymilesDTU` holding the
+unit does not need rebuilding:
+
+```python
+from modbus_connection import ModbusTimeoutError
+
+try:
+    await device.async_update()
+except ModbusTimeoutError:
+    await connection.disconnect()
+```
+
 ## Errors
 
 Communication failures raise the
 [modbus-connection exceptions](https://home-assistant-libs.github.io/modbus-connection/connection/reference/#exceptions),
-all of which derive from `ModbusError`:
+all of which derive from `ModbusError`. A device that refuses a request raises the
+subclass matching the exception code it answered with, so there is no need to compare
+against numbers:
 
 ```python
-from modbus_connection import ModbusError
+from modbus_connection import IllegalDataAddressError, ModbusError
 
 try:
     await device.async_update()
+except IllegalDataAddressError:
+    print('the DTU refused a register block')
 except ModbusError as err:
     print(f'update failed: {err}')
 ```

@@ -112,6 +112,26 @@ async def test_reads_a_dtu_that_misreports_data_size(dtu_connection):
     assert device.plant_data.today_production == 751
 
 
+@pytest.mark.parametrize(
+    'dtu_connection', [pytest.param(lambda data: 0xFF, id='data size far too large')], indirect=True
+)
+async def test_recovers_after_disconnect(dtu_connection):
+    """Verify that a device keeps working once a stuck link has been recycled.
+
+    `disconnect` builds a fresh client on the next request, which carries a fresh
+    decoder, so this also covers the workaround being registered again.
+    """
+    device = HoymilesDTU(dtu_connection.for_unit(1))
+    await device.async_update()
+
+    await dtu_connection.disconnect()
+    assert dtu_connection.connected is False
+
+    await device.async_update()
+    assert dtu_connection.connected is True
+    assert device.inverters == [expected_mi_series_inverter]
+
+
 async def test_stock_connection_cannot_read_such_a_dtu():
     """Verify that the workaround is what makes the DTU readable at all."""
     dtu = FakeDTU(lambda data: 0xFF)
