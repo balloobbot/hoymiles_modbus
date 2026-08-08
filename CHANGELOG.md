@@ -7,7 +7,7 @@ Breaking changes:
 * `HoymilesModbusTCP` is replaced by `HoymilesDTU`, which takes a `ModbusUnit` rather than a host and port. The caller now creates and closes the connection, so one link can be shared with other consumers of the same device
 * the `inverters`, `dtu` and `plant_data` properties are replaced by attributes of the same name, refreshed by `async_update()`
 * `CommunicationParams` is removed. Its settings were pymodbus specific; timeouts and request spacing are now given to `ModbusConnection` by the caller
-* failed requests raise `modbus_connection.ModbusError` subclasses instead of `RuntimeError`. A device that refuses a request raises the subclass matching the exception code it answered with, such as `IllegalDataAddressError`
+* failed requests raise `modbus_connection.ModbusError` subclasses instead of `RuntimeError`. A device that refuses a request raises the subclass matching the exception code it answered with, such as `IllegalDataAddressError`, carrying the refused `ReadBlock` on `.block` so it says which inverter block failed
 * dropped support for Python 3.10 and 3.11, as required by modbus-connection
 
 Features:
@@ -15,7 +15,7 @@ Features:
 
 Notes:
 * the workaround for DTUs that misreport the data size of their responses is retained, and needs the pymodbus backend of modbus-connection
-* requires modbus-connection 4.2 or newer. Its `connect_delay`, `message_spacing` and `disconnect()` are worth reaching for with an unreliable DTU - see the usage documentation
+* requires modbus-connection 4.3 or newer. Its `connect_delay`, `message_spacing` and `disconnect()` are worth reaching for with an unreliable DTU - see the usage documentation
 
 ## [0.10.0] (2025-09-01)
 

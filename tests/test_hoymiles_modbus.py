@@ -9,6 +9,7 @@ from modbus_connection import (
     IllegalDataAddressError,
     ModbusExceptionError,
     ModbusUnit,
+    ReadBlock,
     ServerDeviceFailureError,
 )
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
@@ -191,6 +192,37 @@ async def test_modbus_error_propagates(dtu_unit):
     with pytest.raises(IllegalDataAddressError) as err:
         await HoymilesDTU(dtu_unit).async_update()
     assert err.value.exception_code is ExceptionCode.ILLEGAL_DATA_ADDRESS
+
+
+async def test_refused_inverter_block_says_which_one(dtu_unit):
+    """Verify that a refusal names the inverter block it was about."""
+    map_inverters(dtu_unit, example_mi_series_raw_data, example_hm_series_raw_data)
+    second_inverter = INVERTER_BASE_ADDRESS + INVERTER_ADDRESS_STRIDE
+    dtu_unit.fail_read(second_inverter, IllegalDataAddressError())
+
+    with pytest.raises(IllegalDataAddressError) as err:
+        await HoymilesDTU(dtu_unit).async_update()
+    assert err.value.block == ReadBlock('holding', second_inverter, 20)
+
+
+async def test_refused_serial_number_read_says_which_block(dtu_unit):
+    """Verify that a refused probe names the serial number block."""
+    dtu_unit.fail_read(DTU_SERIAL_NUMBER_ADDRESS, IllegalDataAddressError())
+    with pytest.raises(IllegalDataAddressError) as err:
+        await HoymilesDTU.async_probe(dtu_unit)
+    assert err.value.block == ReadBlock('holding', DTU_SERIAL_NUMBER_ADDRESS, 3)
+
+
+async def test_block_from_the_modelling_layer_is_kept(dtu_unit):
+    """Verify that a block the connection already recorded is not overwritten."""
+    already_blamed = ReadBlock('holding', 0x4321, 7)
+    refusal = IllegalDataAddressError()
+    refusal.block = already_blamed
+    dtu_unit.fail_read(INVERTER_BASE_ADDRESS, refusal)
+
+    with pytest.raises(IllegalDataAddressError) as err:
+        await HoymilesDTU(dtu_unit).async_update()
+    assert err.value.block is already_blamed
 
 
 async def test_silent_dtu_error_propagates(dtu_unit):

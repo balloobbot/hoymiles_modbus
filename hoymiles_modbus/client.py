@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING, Optional
 
+from modbus_connection import ModbusExceptionError, ReadBlock
+
 from ._quirks import apply_dtu_quirks
 from .datatypes import InverterData, PlantData, _serial_number_t
 
@@ -11,6 +13,21 @@ if TYPE_CHECKING:  # pragma: no cover
 
 def _to_bytes(registers: list[int]) -> bytes:
     return b''.join(register.to_bytes(2, 'big') for register in registers)
+
+
+async def _read_block(unit: 'ModbusUnit', address: int, count: int) -> list[int]:
+    """Read holding registers, recording which block a refusal was about.
+
+    A plant is read one block per inverter, so the exception code alone does not say
+    which of them the DTU refused. The block is attached the way the device modelling
+    layer attaches it, leaving the raised class untouched.
+    """
+    try:
+        return await unit.read_holding_registers(address, count)
+    except ModbusExceptionError as err:
+        if err.block is None:
+            err.block = ReadBlock('holding', address, count)
+        raise
 
 
 class HoymilesDTU:
@@ -58,9 +75,7 @@ class HoymilesDTU:
 
         """
         await apply_dtu_quirks(unit)
-        registers = await unit.read_holding_registers(
-            cls._DTU_SERIAL_NUMBER_ADDRESS, cls._DTU_SERIAL_NUMBER_REGISTER_COUNT
-        )
+        registers = await _read_block(unit, cls._DTU_SERIAL_NUMBER_ADDRESS, cls._DTU_SERIAL_NUMBER_REGISTER_COUNT)
         return _serial_number_t.unpack(_to_bytes(registers))
 
     async def async_update(self) -> None:
@@ -75,7 +90,7 @@ class HoymilesDTU:
         data: list[InverterData] = []
         for i in range(self._MAX_INVERTER_COUNT):
             start_address = i * self._INVERTER_ADDRESS_STRIDE + self._INVERTER_BASE_ADDRESS
-            registers = await self._unit.read_holding_registers(start_address, self._INVERTER_REGISTER_COUNT)
+            registers = await _read_block(self._unit, start_address, self._INVERTER_REGISTER_COUNT)
             data_to_unpack = _to_bytes(registers)[: self._INVERTER_DATA_SIZE]
             if i < 1 and len(data_to_unpack) < 1:
                 raise RuntimeError("Inverters not mapped yet.")

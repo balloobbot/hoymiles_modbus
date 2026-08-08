@@ -84,10 +84,14 @@ from modbus_connection import IllegalDataAddressError, ModbusError
 
 try:
     await device.async_update()
-except IllegalDataAddressError:
-    print('the DTU refused a register block')
+except IllegalDataAddressError as err:
+    print(f'the DTU refused the register block at {err.block.address}')
 except ModbusError as err:
     print(f'update failed: {err}')
 ```
+
+A plant is read one block per inverter, so the exception code alone would not say
+which one the DTU refused. `err.block` is the `ReadBlock(space, address, count)` that
+was refused, the same attribute the device modelling layer sets.
 
 A DTU that responds but has not mapped its inverters yet raises `RuntimeError`.
