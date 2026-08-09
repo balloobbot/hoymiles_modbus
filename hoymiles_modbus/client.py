@@ -3,9 +3,11 @@
 from typing import TYPE_CHECKING, Optional
 
 from modbus_connection import ModbusExceptionError, ReadBlock
+from plum.exceptions import UnpackError
 
 from ._quirks import apply_dtu_quirks
 from .datatypes import InverterData, PlantData, _serial_number_t
+from .exceptions import InverterDataError, InvertersNotMappedError
 
 if TYPE_CHECKING:  # pragma: no cover
     from modbus_connection import ModbusUnit
@@ -76,7 +78,10 @@ class HoymilesDTU:
         """
         await apply_dtu_quirks(unit)
         registers = await _read_block(unit, cls._DTU_SERIAL_NUMBER_ADDRESS, cls._DTU_SERIAL_NUMBER_REGISTER_COUNT)
-        return _serial_number_t.unpack(_to_bytes(registers))
+        try:
+            return _serial_number_t.unpack(_to_bytes(registers))
+        except UnpackError as err:
+            raise InverterDataError(f'Could not decode the DTU serial number: {err.__class__.__name__}') from err
 
     async def async_update(self) -> None:
         """Refresh all data with a new request to the installation."""
@@ -93,8 +98,14 @@ class HoymilesDTU:
             registers = await _read_block(self._unit, start_address, self._INVERTER_REGISTER_COUNT)
             data_to_unpack = _to_bytes(registers)[: self._INVERTER_DATA_SIZE]
             if i < 1 and len(data_to_unpack) < 1:
-                raise RuntimeError("Inverters not mapped yet.")
-            inverter_data = InverterData.unpack(data_to_unpack)
+                raise InvertersNotMappedError("Inverters not mapped yet.")
+            try:
+                inverter_data = InverterData.unpack(data_to_unpack)
+            except UnpackError as err:
+                raise InverterDataError(
+                    f'Could not decode inverter {i}: the DTU answered with '
+                    f'{len(data_to_unpack)} of {self._INVERTER_DATA_SIZE} bytes'
+                ) from err
             if inverter_data.serial_number == self._NULL_INVERTER:
                 break
             data.append(inverter_data)

@@ -94,4 +94,24 @@ A plant is read one block per inverter, so the exception code alone would not sa
 which one the DTU refused. `err.block` is the `ReadBlock(space, address, count)` that
 was refused, the same attribute the device modelling layer sets.
 
-A DTU that responds but has not mapped its inverters yet raises `RuntimeError`.
+A DTU that answers with something the library cannot make sense of raises a
+`HoymilesModbusError` instead. There are two, and both derive from `RuntimeError`, which
+is what the library raised before they existed:
+
+```python
+from hoymiles_modbus import HoymilesModbusError, InverterDataError, InvertersNotMappedError
+
+try:
+    await device.async_update()
+except InvertersNotMappedError:
+    print('add the inverters to the DTU first')
+except InverterDataError as err:
+    print(f'the DTU sent an incomplete answer: {err}')
+```
+
+`InverterDataError` covers a DTU that sends fewer bytes than its own data size byte
+claims. The data size workaround makes such a response decodable as Modbus registers; it
+cannot supply the bytes that never arrived.
+
+So a caller that wants everything needs two `except` clauses - `ModbusError` for the
+link and the device's refusals, `HoymilesModbusError` for the DTU's own answers.

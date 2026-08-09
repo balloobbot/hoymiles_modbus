@@ -13,9 +13,11 @@ from modbus_connection import (
     ServerDeviceFailureError,
 )
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
+from plum.exceptions import UnpackError
 
 from hoymiles_modbus.client import HoymilesDTU
 from hoymiles_modbus.datatypes import InverterData
+from hoymiles_modbus.exceptions import HoymilesModbusError, InverterDataError, InvertersNotMappedError
 
 DTU_SERIAL_NUMBER_ADDRESS = 0x2000
 INVERTER_BASE_ADDRESS = 0x1000
@@ -248,6 +250,46 @@ async def test_exception_when_no_inverters():
     """Test exception when there are no inverters."""
     unit = _EmptyResponseUnit(MockModbusConnection(), 1)
     assert isinstance(unit, ModbusUnit)
-    with pytest.raises(RuntimeError) as err:
+    with pytest.raises(InvertersNotMappedError) as err:
         await HoymilesDTU(unit).async_update()
     assert str(err.value) == "Inverters not mapped yet."
+    assert isinstance(err.value, RuntimeError)  # what the library raised before
+
+
+class _ShortSecondBlockUnit(MockModbusUnit):
+    """A DTU that answers a later inverter block with less data than it asked for."""
+
+    async def read_holding_registers(self, address: int, count: int) -> list[int]:
+        if address == INVERTER_BASE_ADDRESS + INVERTER_ADDRESS_STRIDE:
+            return [0, 0]
+        return await super().read_holding_registers(address, count)
+
+
+async def test_short_inverter_block_is_a_library_error():
+    """Verify that a truncated inverter block does not leak the decoder's own exception.
+
+    The data size workaround makes such a response decodable as registers, but it cannot
+    conjure the bytes the DTU never sent.
+    """
+    unit = _ShortSecondBlockUnit(MockModbusConnection(), 1)
+    unit.holding[INVERTER_BASE_ADDRESS] = to_registers(example_mi_series_raw_data)
+
+    with pytest.raises(InverterDataError) as err:
+        await HoymilesDTU(unit).async_update()
+    assert 'inverter 1' in str(err.value)
+    assert '4 of 40 bytes' in str(err.value)
+    assert isinstance(err.value.__cause__, UnpackError)
+
+
+async def test_short_serial_number_read_is_a_library_error():
+    """Verify that a truncated serial number response is reported as a library error."""
+    unit = _EmptyResponseUnit(MockModbusConnection(), 1)
+    with pytest.raises(InverterDataError):
+        await HoymilesDTU.async_probe(unit)
+
+
+def test_library_errors_share_a_base():
+    """Verify that one except clause covers everything this library raises itself."""
+    assert issubclass(InvertersNotMappedError, HoymilesModbusError)
+    assert issubclass(InverterDataError, HoymilesModbusError)
+    assert issubclass(HoymilesModbusError, RuntimeError)
