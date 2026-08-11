@@ -16,7 +16,7 @@ Features:
 * the package is marked as typed (`py.typed`), and `HoymilesDTU`, `InverterData`, `PlantData` and the errors are importable from `hoymiles_modbus` directly
 
 Notes:
-* the workaround for DTUs that misreport the data size of their responses is retained, and needs the pymodbus backend of modbus-connection
+* the workaround for DTUs that misreport the data size of their responses is retained, and needs the pymodbus backend of modbus-connection, with pymodbus 3.12 or newer
 * requires modbus-connection 4.4 or newer. Its `connect_delay`, `message_spacing` and `disconnect()` are worth reaching for with an unreliable DTU - see the usage documentation
 * on 4.4 a refused read also names the request in the exception message, so a log line reads `read_holding_registers(4096, 20): Device returned Modbus exception code 2` rather than the bare code
 
