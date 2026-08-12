@@ -17,7 +17,7 @@ Features:
 
 Notes:
 * the workaround for DTUs that misreport the data size of their responses is retained, and needs the pymodbus backend of modbus-connection, with pymodbus 3.12 or newer
-* requires modbus-connection 4.5.1 or newer. Its `connect_delay`, `message_spacing` and `disconnect()` are worth reaching for with an unreliable DTU - see the usage documentation
+* requires modbus-connection 4.6.0 or newer. Its `connect_delay`, `message_spacing` and `disconnect()` are worth reaching for with an unreliable DTU - see the usage documentation
 * a refused read also names the request in the exception message, so a log line reads `read_holding_registers(4096, 20): Device returned Modbus exception code 2` rather than the bare code
 
 ## [0.10.0] (2025-09-01)
