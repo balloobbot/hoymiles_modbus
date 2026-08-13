@@ -119,7 +119,7 @@ async def test_stop_inverter_data_decode_on_empty_serial(dtu_unit):
     device = HoymilesDTU(dtu_unit)
     await device.async_update()
     assert device.inverters == [expected_mi_series_inverter]
-    assert len(dtu_unit.read_events) == 3  # two inverter blocks, then the serial number
+    assert len(dtu_unit.read_events) == 3  # the serial number, then two inverter blocks
 
 
 async def test_dtu(dtu_unit):
@@ -197,14 +197,17 @@ async def test_modbus_error_propagates(dtu_unit):
 
 
 async def test_refused_inverter_block_says_which_one(dtu_unit):
-    """Verify that a refusal names the inverter block it was about."""
+    """Verify that a refusal names the inverter block it was about.
+
+    A refusal of a block beyond the plant the last update read is reported rather than
+    raised, so the block it was about is read off the report.
+    """
     map_inverters(dtu_unit, example_mi_series_raw_data, example_hm_series_raw_data)
     second_inverter = INVERTER_BASE_ADDRESS + INVERTER_ADDRESS_STRIDE
     dtu_unit.fail_read(second_inverter, IllegalDataAddressError())
 
-    with pytest.raises(IllegalDataAddressError) as err:
-        await HoymilesDTU(dtu_unit).async_update()
-    assert err.value.block == ReadBlock('holding', second_inverter, 20)
+    report = await HoymilesDTU(dtu_unit).async_update()
+    assert report.failed['slot 1'].block == ReadBlock('holding', second_inverter, 20)
 
 
 async def test_refused_serial_number_read_says_which_block(dtu_unit):
@@ -246,9 +249,18 @@ class _EmptyResponseUnit(MockModbusUnit):
         return []
 
 
+class _UnmappedDtuUnit(_EmptyResponseUnit):
+    """A DTU that knows its own serial number, but serves no inverter blocks."""
+
+    async def read_holding_registers(self, address: int, count: int) -> list[int]:
+        if address == DTU_SERIAL_NUMBER_ADDRESS:
+            return to_registers(example_dtu_serial_number_raw_data)
+        return await super().read_holding_registers(address, count)
+
+
 async def test_exception_when_no_inverters():
     """Test exception when there are no inverters."""
-    unit = _EmptyResponseUnit(MockModbusConnection(), 1)
+    unit = _UnmappedDtuUnit(MockModbusConnection(), 1)
     assert isinstance(unit, ModbusUnit)
     with pytest.raises(InvertersNotMappedError) as err:
         await HoymilesDTU(unit).async_update()

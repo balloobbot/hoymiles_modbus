@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Optional, Union
 
+from modbus_connection import ModbusError
 from plum.array import ArrayX
 from plum.bigendian import uint8, uint16, uint32
 from plum.bytes import BytesX
@@ -114,3 +115,24 @@ class PlantData:
     """Alarm indicator. True means that at least one inverter reported an alarm."""
     inverters: list[InverterData] = field(default_factory=list)
     """Data for each inverter."""
+
+
+@dataclass(frozen=True)
+class UpdateReport:
+    """What one poll refreshed, by inverter serial number.
+
+    An inverter whose block failed kept the data of the poll before, and the error that
+    failed it rides along. A slot no poll has read yet has no serial number to be named
+    by, so it appears as `slot <position>`. A dead link is never in here - the update
+    raises `ModbusConnectionError` rather than report partial silence.
+    """
+
+    updated: set[str]
+    """Serial numbers of the inverters this poll refreshed."""
+    failed: dict[str, ModbusError]
+    """Error of every block that failed, by the serial number of the inverter it holds."""
+
+    @property
+    def complete(self) -> bool:
+        """Whether every block of the poll answered."""
+        return not self.failed

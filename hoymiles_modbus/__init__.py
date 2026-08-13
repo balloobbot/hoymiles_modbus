@@ -1,7 +1,7 @@
 """Top-level package for hoymiles_modbus."""
 
 from .client import HoymilesDTU
-from .datatypes import InverterData, PlantData
+from .datatypes import InverterData, PlantData, UpdateReport
 from .exceptions import HoymilesModbusError, InverterDataError, InvertersNotMappedError
 
 __author__ = """Mariusz Wasiluk"""
@@ -15,4 +15,5 @@ __all__ = [
     'InverterDataError',
     'InvertersNotMappedError',
     'PlantData',
+    'UpdateReport',
 ]

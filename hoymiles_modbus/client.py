@@ -2,11 +2,11 @@
 
 from typing import TYPE_CHECKING, Optional
 
-from modbus_connection import ModbusExceptionError, ReadBlock
+from modbus_connection import ModbusConnectionError, ModbusError, ModbusExceptionError, ReadBlock
 from plum.exceptions import UnpackError
 
 from ._quirks import apply_dtu_quirks
-from .datatypes import InverterData, PlantData, _serial_number_t
+from .datatypes import InverterData, PlantData, UpdateReport, _serial_number_t
 from .exceptions import InverterDataError, InvertersNotMappedError
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -62,7 +62,9 @@ class HoymilesDTU:
         self.dtu: str = ''
         """DTU serial number. Empty until the first update."""
         self.inverters: list[InverterData] = []
-        """Status data from all inverters, as of the last update."""
+        """Status data from all inverters, as of the last update.
+
+        An inverter whose block failed keeps the data of the update before it."""
         self.plant_data: Optional[PlantData] = None
         """Plant status data, as of the last update. `None` until the first update."""
 
@@ -83,19 +85,49 @@ class HoymilesDTU:
         except UnpackError as err:
             raise InverterDataError(f'Could not decode the DTU serial number: {err.__class__.__name__}') from err
 
-    async def async_update(self) -> None:
-        """Refresh all data with a new request to the installation."""
+    async def async_update(self) -> UpdateReport:
+        """Refresh all data with a new request to the installation.
+
+        A plant is read one block per inverter, and the blocks are independent: an
+        inverter whose block fails keeps the data of the update before while the rest
+        still refresh, and the returned report names it with the error that failed it.
+        A failure of the link itself raises `ModbusConnectionError` instead.
+
+        The DTU serial number is read first and only once - it identifies the
+        installation, so until it is known there is nothing to report against.
+        """
         await apply_dtu_quirks(self._unit)
-        self.inverters = await self._async_read_inverters()
         if not self.dtu:
             self.dtu = await self.async_probe(self._unit)
+        self.inverters, failed = await self._async_read_inverters()
         self.plant_data = self._calculate_plant_data()
+        # A failed slot holds the inverter the previous update read, so what refreshed is
+        # every serial number in the plant except the ones reported as failed.
+        return UpdateReport({inverter.serial_number for inverter in self.inverters} - failed.keys(), failed)
 
-    async def _async_read_inverters(self) -> list[InverterData]:
+    async def _async_read_inverters(self) -> tuple[list[InverterData], dict[str, ModbusError]]:
+        known = self.inverters
         data: list[InverterData] = []
+        failed: dict[str, ModbusError] = {}
         for i in range(self._MAX_INVERTER_COUNT):
             start_address = i * self._INVERTER_ADDRESS_STRIDE + self._INVERTER_BASE_ADDRESS
-            registers = await _read_block(self._unit, start_address, self._INVERTER_REGISTER_COUNT)
+            try:
+                registers = await _read_block(self._unit, start_address, self._INVERTER_REGISTER_COUNT)
+            except ModbusConnectionError:
+                raise
+            except ModbusError as err:
+                if i < len(known):
+                    # The slot keeps the inverter the last update read, which also keeps
+                    # the numbering of the slots behind it intact.
+                    failed[known[i].serial_number] = err
+                    data.append(known[i])
+                    continue
+                if not data:
+                    raise  # the plant was never read, so there is nothing partial to report
+                # No update has read this slot, so there is no inverter to keep in it and
+                # no telling whether the plant ends here. The next update scans again.
+                failed[f'slot {i}'] = err
+                break
             data_to_unpack = _to_bytes(registers)[: self._INVERTER_DATA_SIZE]
             if i < 1 and len(data_to_unpack) < 1:
                 raise InvertersNotMappedError("Inverters not mapped yet.")
@@ -109,7 +141,7 @@ class HoymilesDTU:
             if inverter_data.serial_number == self._NULL_INVERTER:
                 break
             data.append(inverter_data)
-        return data
+        return data, failed
 
     def _calculate_plant_data(self) -> PlantData:
         data = PlantData(self.dtu, inverters=self.inverters)
