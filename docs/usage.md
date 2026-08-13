@@ -27,7 +27,28 @@ asyncio.run(main())
 ```
 
 `async_update()` issues a new request to the installation and refreshes `dtu`,
-`inverters` and `plant_data`. The DTU serial number is read only on the first update.
+`inverters` and `plant_data`. The DTU serial number is read first, and only on the first
+update - it identifies the installation, so until it is known there is nothing to report
+against.
+
+## Partial updates
+
+A plant is read one block per inverter, and those blocks are independent: an inverter the
+DTU will not answer for keeps the data of the update before while the rest still refresh.
+The `UpdateReport` says which is which:
+
+```python
+report = await device.async_update()
+if not report.complete:
+    for serial_number, error in report.failed.items():
+        print(f'{serial_number} kept the data of the previous update: {error}')
+```
+
+`failed` is keyed by inverter serial number. The block that ends the scan is the
+exception: it is the one behind the last inverter, so no update has ever read an inverter
+from it, and it appears as `slot <position>` instead. Nothing is stale when that block
+fails - an inverter added to the DTU since the last update just stays undiscovered until
+the next one.
 
 ## Identifying a DTU during setup
 
@@ -59,15 +80,13 @@ connection = ModbusConnection(
 ```
 
 When the DTU stops answering altogether, drop the link and let the next update build a
-new one. Unlike `close()`, the connection stays usable and the `HoymilesDTU` holding the
-unit does not need rebuilding:
+new one. Every inverter block failing is what that looks like from here, so the report is
+what to watch. Unlike `close()`, the connection stays usable and the `HoymilesDTU` holding
+the unit does not need rebuilding:
 
 ```python
-from modbus_connection import ModbusTimeoutError
-
-try:
-    await device.async_update()
-except ModbusTimeoutError:
+report = await device.async_update()
+if not report.updated:
     await connection.disconnect()
 ```
 
@@ -77,7 +96,11 @@ Communication failures raise the
 [modbus-connection exceptions](https://home-assistant-libs.github.io/modbus-connection/connection/reference/#exceptions),
 all of which derive from `ModbusError`. A device that refuses a request raises the
 subclass matching the exception code it answered with, so there is no need to compare
-against numbers:
+against numbers.
+
+Most of them reach the caller through `report.failed` rather than by being raised. What
+still raises is a dead link, the DTU serial number read, and an update that could not
+read a single inverter - none of which leaves anything partial to report:
 
 ```python
 from modbus_connection import IllegalDataAddressError, ModbusError
@@ -92,7 +115,8 @@ except ModbusError as err:
 
 A plant is read one block per inverter, so the exception code alone would not say
 which one the DTU refused. `err.block` is the `ReadBlock(space, address, count)` that
-was refused, the same attribute the device modelling layer sets.
+was refused, the same attribute the device modelling layer sets, and it is there whether
+the error was raised or reported.
 
 A DTU that answers with something the library cannot make sense of raises a
 `HoymilesModbusError` instead. There are two, and both derive from `RuntimeError`, which

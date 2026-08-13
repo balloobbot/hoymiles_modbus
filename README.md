@@ -28,6 +28,7 @@ Disclaimer: This is an independent project, not affiliated with Hoymiles. Any tr
 * Asynchronous communication, built on [modbus-connection](https://home-assistant-libs.github.io/modbus-connection/)
 * Works over any transport that modbus-connection supports, with the caller owning the connection
 * Tolerates DTUs that misreport the data size of their responses
+* Keeps the plant readable when the DTU goes quiet on one inverter
 * Decode all inverter status registers, which include information such as:
   * current production
   * total production
@@ -36,6 +37,20 @@ Disclaimer: This is an independent project, not affiliated with Hoymiles. Any tr
   * alarms
   * status
   * grid voltage and frequency
+
+## Partial updates
+
+A plant is read one block per inverter, and those blocks are independent: one inverter the DTU
+will not answer for does not take the rest of the plant with it. `async_update()` returns an
+`UpdateReport` — an inverter whose block failed keeps the data of the update before and is listed
+by serial number with the error that failed it, while every other inverter refreshes. Only a dead
+link (`ModbusConnectionError`) raises:
+
+```python
+report = await device.async_update()
+for serial_number, error in report.failed.items():
+    print(f'{serial_number} kept the data of the previous update: {error}')
+```
 
 ## Applications
 This library is for creating higher-level applications such as [Home Assistant integration](https://github.com/wasilukm/hoymiles-mqtt)
