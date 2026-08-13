@@ -58,6 +58,25 @@ To learn which DTU is at an address without polling the whole plant, probe it:
 serial_number = await HoymilesDTU.async_probe(connection.for_unit(1))
 ```
 
+## Diagnostics
+
+`async_read_raw()` returns every register the library reads, undecoded, keyed by address
+space and absolute address - what to attach to a bug report:
+
+```python
+raw = await device.async_read_raw()
+print(raw['holding'][0x1000])
+```
+
+The serial number block is in there along with the plant, so the registers only setup
+reads are not left out. The plant is dumped as the last update found it, plus the first
+inverter block whether or not an update ever got that far - a DTU whose answer the library
+could not decode is the report this exists for, and that block is the evidence.
+
+An inverter that will not answer is left out of the dump rather than costing it the rest
+of the plant, since a plant that is misbehaving is when the dump is worth having. A dead
+link still raises `ModbusConnectionError`.
+
 ## Choosing a backend
 
 Use `modbus_connection.pymodbus`. Some DTUs send responses whose data size byte

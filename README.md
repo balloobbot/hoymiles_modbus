@@ -29,6 +29,7 @@ Disclaimer: This is an independent project, not affiliated with Hoymiles. Any tr
 * Works over any transport that modbus-connection supports, with the caller owning the connection
 * Tolerates DTUs that misreport the data size of their responses
 * Keeps the plant readable when the DTU goes quiet on one inverter
+* Dumps every register it reads, undecoded, for attaching to a bug report
 * Decode all inverter status registers, which include information such as:
   * current production
   * total production

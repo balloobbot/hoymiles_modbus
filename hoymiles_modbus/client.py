@@ -105,6 +105,35 @@ class HoymilesDTU:
         # every serial number in the plant except the ones reported as failed.
         return UpdateReport({inverter.serial_number for inverter in self.inverters} - failed.keys(), failed)
 
+    async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
+        """Every register this DTU reads, undecoded - for diagnostics.
+
+        The serial number block comes along: only setup reads it, so walking the plant
+        alone would leave out what identifies the installation. The plant is read as the
+        last update found it, plus the first inverter block regardless - a DTU whose
+        answer no update could decode has no plant, and that block is the evidence.
+
+        An inverter that will not answer is left out rather than costing the dump the
+        whole plant, since a plant that is misbehaving is when the dump is worth having.
+        A failure of the link itself still raises `ModbusConnectionError`.
+        """
+        await apply_dtu_quirks(self._unit)
+        blocks = [(self._DTU_SERIAL_NUMBER_ADDRESS, self._DTU_SERIAL_NUMBER_REGISTER_COUNT)]
+        blocks += [
+            (i * self._INVERTER_ADDRESS_STRIDE + self._INVERTER_BASE_ADDRESS, self._INVERTER_REGISTER_COUNT)
+            for i in range(max(len(self.inverters), 1))
+        ]
+        raw: dict[int, int | bool] = {}
+        for address, count in blocks:
+            try:
+                registers = await _read_block(self._unit, address, count)
+            except ModbusConnectionError:
+                raise
+            except ModbusError:
+                continue
+            raw.update(enumerate(registers, address))
+        return {'holding': dict(sorted(raw.items()))}
+
     async def _async_read_inverters(self) -> tuple[list[InverterData], dict[str, ModbusError]]:
         known = self.inverters
         data: list[InverterData] = []

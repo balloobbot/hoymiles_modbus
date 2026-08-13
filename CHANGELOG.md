@@ -13,6 +13,7 @@ Breaking changes:
 Features:
 * `HoymilesDTU.async_probe()` reads the DTU serial number without polling the inverters, for identifying a device during setup
 * errors the library raises itself now share a `HoymilesModbusError` base, in `hoymiles_modbus.exceptions`. `InvertersNotMappedError` replaces the bare `RuntimeError` for a DTU with no inverters added, and `InverterDataError` covers a DTU answering with fewer bytes than it claims - which previously escaped as the decoder's own `plum.exceptions.UnpackError`. Both derive from `RuntimeError`, so existing handlers keep working
+* `HoymilesDTU.async_read_raw()` returns every register the library reads, undecoded and keyed by address space and address, for attaching to a bug report. The serial number block that only setup reads is included, and an inverter that will not answer is left out rather than costing the dump the rest of the plant
 * the package is marked as typed (`py.typed`), and `HoymilesDTU`, `InverterData`, `PlantData` and the errors are importable from `hoymiles_modbus` directly
 
 Notes:
