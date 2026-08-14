@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Optional
 
-from modbus_connection import ModbusConnectionError, ModbusError, ModbusExceptionError, ReadBlock
+from modbus_connection import ModbusConnectionError, ModbusError, ModbusExceptionError, ModbusTimeoutError, ReadBlock
 from plum.exceptions import UnpackError
 
 from ._quirks import apply_dtu_quirks
@@ -91,7 +91,10 @@ class HoymilesDTU:
         A plant is read one block per inverter, and the blocks are independent: an
         inverter whose block fails keeps the data of the update before while the rest
         still refresh, and the returned report names it with the error that failed it.
-        A failure of the link itself raises `ModbusConnectionError` instead.
+        A failure of the link itself raises `ModbusConnectionError` instead, and a first
+        block that times out raises `ModbusTimeoutError`: a DTU that has not answered at
+        all is silent rather than slow, and walking the plant would pay a timeout per
+        inverter.
 
         The DTU serial number is read first and only once - it identifies the
         installation, so until it is known there is nothing to report against.
@@ -145,6 +148,9 @@ class HoymilesDTU:
             except ModbusConnectionError:
                 raise
             except ModbusError as err:
+                if not data and not failed and isinstance(err, ModbusTimeoutError):
+                    # Nothing has answered yet, so the rest of the plant would only time out too.
+                    raise
                 if i < len(known):
                     # The slot keeps the inverter the last update read, which also keeps
                     # the numbering of the slots behind it intact.

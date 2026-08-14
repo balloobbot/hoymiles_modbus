@@ -44,8 +44,10 @@ Disclaimer: This is an independent project, not affiliated with Hoymiles. Any tr
 A plant is read one block per inverter, and those blocks are independent: one inverter the DTU
 will not answer for does not take the rest of the plant with it. `async_update()` returns an
 `UpdateReport` — an inverter whose block failed keeps the data of the update before and is listed
-by serial number with the error that failed it, while every other inverter refreshes. Only a dead
-link (`ModbusConnectionError`) raises:
+by serial number with the error that failed it, while every other inverter refreshes. A dead link
+(`ModbusConnectionError`) raises, and so does a first block that times out
+(`ModbusTimeoutError`) — a DTU that has answered nothing at all is silent rather than slow, and
+reading on would pay the timeout again for every inverter:
 
 ```python
 report = await device.async_update()

@@ -50,6 +50,10 @@ from it, and it appears as `slot <position>` instead. Nothing is stale when that
 fails - an inverter added to the DTU since the last update just stays undiscovered until
 the next one.
 
+A timeout is only contained once the DTU has answered something. When the very first block
+times out the update raises `ModbusTimeoutError`: the DTU is silent rather than slow, and
+walking the plant would pay the timeout again for every inverter in it.
+
 ## Identifying a DTU during setup
 
 To learn which DTU is at an address without polling the whole plant, probe it:

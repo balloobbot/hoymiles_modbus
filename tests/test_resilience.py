@@ -54,21 +54,36 @@ async def test_a_failed_inverter_leaves_the_rest_fresh(dtu_unit):
     device = HoymilesDTU(dtu_unit)
     await device.async_update()
 
-    # Both inverters produce more than they did, but the DTU stops answering for the first.
+    # Both inverters produce more than they did, but the DTU stops answering for the second.
     map_inverters(
         dtu_unit,
         _with_today_production(example_mi_series_raw_data, 800),
         _with_today_production(example_hm_series_raw_data, 900),
     )
-    dtu_unit.fail_read(INVERTER_BASE_ADDRESS, ModbusTimeoutError('slow inverter'))
+    dtu_unit.fail_read(INVERTER_BASE_ADDRESS + INVERTER_ADDRESS_STRIDE, ModbusTimeoutError('slow inverter'))
     report = await device.async_update()
 
     assert not report.complete
-    assert set(report.failed) == {MI_SERIAL}
-    assert isinstance(report.failed[MI_SERIAL], ModbusTimeoutError)
-    assert report.updated == {HM_SERIAL}
-    assert device.inverters[0].today_production == 751  # the previous value, kept
-    assert device.inverters[1].today_production == 900
+    assert set(report.failed) == {HM_SERIAL}
+    assert isinstance(report.failed[HM_SERIAL], ModbusTimeoutError)
+    assert report.updated == {MI_SERIAL}
+    assert device.inverters[0].today_production == 800
+    assert device.inverters[1].today_production == 751  # the previous value, kept
+
+
+async def test_a_silent_plant_raises_instead_of_a_timeout_per_inverter(dtu_unit):
+    """Verify that a DTU which answers nothing at all is not walked inverter by inverter.
+
+    The blocks are independent, but a first block that times out means the DTU is silent
+    rather than slow - reading on would only pay the timeout again for every inverter.
+    """
+    device = HoymilesDTU(dtu_unit)
+    await device.async_update()
+
+    dtu_unit.fail_requests(ModbusTimeoutError('silent DTU'))
+    with pytest.raises(ModbusTimeoutError):
+        await device.async_update()
+    assert device.inverters == [expected_mi_series_inverter, expected_hm_series_inverter]
 
 
 async def test_a_failed_inverter_still_counts_towards_the_plant(dtu_unit):
@@ -76,7 +91,7 @@ async def test_a_failed_inverter_still_counts_towards_the_plant(dtu_unit):
     device = HoymilesDTU(dtu_unit)
     await device.async_update()
 
-    dtu_unit.fail_read(INVERTER_BASE_ADDRESS, ModbusTimeoutError('slow inverter'))
+    dtu_unit.fail_read(INVERTER_BASE_ADDRESS + INVERTER_ADDRESS_STRIDE, ModbusTimeoutError('slow inverter'))
     await device.async_update()
 
     assert device.plant_data.dtu == '11d361600831'

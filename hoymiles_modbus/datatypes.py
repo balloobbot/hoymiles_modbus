@@ -124,7 +124,8 @@ class UpdateReport:
     An inverter whose block failed kept the data of the poll before, and the error that
     failed it rides along. A slot no poll has read yet has no serial number to be named
     by, so it appears as `slot <position>`. A dead link is never in here - the update
-    raises `ModbusConnectionError` rather than report partial silence.
+    raises `ModbusConnectionError` rather than report partial silence, and neither is a
+    plant that never answered: the first block timing out raises `ModbusTimeoutError`.
     """
 
     updated: set[str]
