@@ -1180,14 +1180,14 @@ mkdocstrings = ">=0.26"
 
 [[package]]
 name = "modbus-connection"
-version = "4.6.1"
+version = "4.7.0"
 description = "A small, backend-neutral Modbus connection abstraction (pymodbus / tmodbus)."
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "modbus_connection-4.6.1-py3-none-any.whl", hash = "sha256:5228820180b34a60879bf11d3c90a191338c0a2daeb1f4b3e862732b5264dcc2"},
-    {file = "modbus_connection-4.6.1.tar.gz", hash = "sha256:377e252b6fc54c5dc239fbdec0b53a1185888a71c3a4e78552690c7a9a19ab04"},
+    {file = "modbus_connection-4.7.0-py3-none-any.whl", hash = "sha256:02cf37957a3eaee785a469a6bb5df637e452982128aff0c85b93dca2d192b64c"},
+    {file = "modbus_connection-4.7.0.tar.gz", hash = "sha256:4339e2181afceaae9870fb673bb304ee62857b67bb1401246c106e0faa749f2e"},
 ]
 
 [package.dependencies]
@@ -1195,7 +1195,7 @@ pymodbus = {version = ">=3.11", extras = ["serial"], optional = true, markers = 
 
 [package.extras]
 pymodbus = ["pymodbus[serial] (>=3.11)"]
-tmodbus = ["tmodbus[async-serial] (>=0.5.0)"]
+tmodbus = ["tmodbus[async-serial] (>=0.5.1)"]
 
 [[package]]
 name = "more-itertools"
@@ -2126,4 +2126,4 @@ test = ["black", "flake8", "flake8-docstrings", "isort", "mypy", "pytest", "pyte
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "b7c880daa62c091981e7a7865b20607438384d4bb3d7586f353b7b63b17e9ecb"
+content-hash = "48036ef55bdf0726754163a0fd1618a8aebb876c75c7d7d1a8417cd9d19350db"
