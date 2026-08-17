@@ -1180,14 +1180,14 @@ mkdocstrings = ">=0.26"
 
 [[package]]
 name = "modbus-connection"
-version = "4.7.0"
+version = "4.8.1"
 description = "A small, backend-neutral Modbus connection abstraction (pymodbus / tmodbus)."
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "modbus_connection-4.7.0-py3-none-any.whl", hash = "sha256:02cf37957a3eaee785a469a6bb5df637e452982128aff0c85b93dca2d192b64c"},
-    {file = "modbus_connection-4.7.0.tar.gz", hash = "sha256:4339e2181afceaae9870fb673bb304ee62857b67bb1401246c106e0faa749f2e"},
+    {file = "modbus_connection-4.8.1-py3-none-any.whl", hash = "sha256:db22133f966afed780a085b59f8d52196e24530e4b335c3c7a5d6e0948ce5ec0"},
+    {file = "modbus_connection-4.8.1.tar.gz", hash = "sha256:b1ededef001463d39125a2d2a3b10870892393479030e902839fc71d37f107cf"},
 ]
 
 [package.dependencies]
@@ -2126,4 +2126,4 @@ test = ["black", "flake8", "flake8-docstrings", "isort", "mypy", "pytest", "pyte
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "48036ef55bdf0726754163a0fd1618a8aebb876c75c7d7d1a8417cd9d19350db"
+content-hash = "c54ade277ca3aed2092dfc7dac32eeaf923c6cfe7777c6185a53feff2c4c71d8"
